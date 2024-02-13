@@ -1,8 +1,8 @@
-package wolfendale
+package io.github.wolfendale.parser
 
 import org.scalatest.matchers.must.Matchers
 
-trait ParseResultExtensions:
+transparent trait ParseResultExtensions:
   self: Matchers =>
 
   extension [A](result: ParseResult[A])

@@ -1,15 +1,17 @@
-package wolfendale.parsers
+package io.github.wolfendale.parser.builder
 
+import io.github.wolfendale.parser.{ParseResultExtensions, StringParseState}
 import org.scalacheck.{Gen, Shrink}
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.must.Matchers
 import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
-import wolfendale.{ParseResultExtensions, StringParseState}
 
 class TextParserSpec extends AnyFreeSpec, Matchers, ScalaCheckDrivenPropertyChecks, ParseResultExtensions:
 
   given [A]: Shrink[A] =
     Shrink.shrinkAny
+
+  import default.*
 
   "anyChar" - {
 
@@ -22,7 +24,7 @@ class TextParserSpec extends AnyFreeSpec, Matchers, ScalaCheckDrivenPropertyChec
       yield (input, position)
 
       forAll(inputGen): (input, position) =>
-        val result = anyChar.parse(StringParseState(input, position)).asCompleted
+        val result = anyChar.parse(StringParseState(input, position)).value.asCompleted
         result.result mustEqual input(position)
         result.state.position mustEqual position + 1
 
@@ -35,7 +37,7 @@ class TextParserSpec extends AnyFreeSpec, Matchers, ScalaCheckDrivenPropertyChec
       yield (input, position)
 
       forAll(inputGen): (input, position) =>
-        val result = anyChar.parse(StringParseState(input, position)).asFailed
+        val result = anyChar.parse(StringParseState(input, position)).value.asFailed
         result.state.position mustEqual position
         result.error mustEqual "no more input"
   }
@@ -53,7 +55,7 @@ class TextParserSpec extends AnyFreeSpec, Matchers, ScalaCheckDrivenPropertyChec
       forAll(inputGen): (input, position) =>
         val expected = input(position)
         val parser = char(expected)
-        val result = parser.parse(StringParseState(input, position)).asCompleted
+        val result = parser.parse(StringParseState(input, position)).value.asCompleted
         result.result mustEqual expected
         result.state.position mustEqual position + 1
 
@@ -68,7 +70,7 @@ class TextParserSpec extends AnyFreeSpec, Matchers, ScalaCheckDrivenPropertyChec
 
       forAll(inputGen): (input, position, expected) =>
         val parser = char(expected)
-        val result = parser.parse(StringParseState(input, position)).asFailed
+        val result = parser.parse(StringParseState(input, position)).value.asFailed
         result.state.position mustEqual position
         result.error mustEqual s"'${input(position)}' did not equal '$expected'"
 
@@ -83,7 +85,7 @@ class TextParserSpec extends AnyFreeSpec, Matchers, ScalaCheckDrivenPropertyChec
 
       forAll(inputGen): (input, position, c) =>
         val parser = char(c)
-        val result = parser.parse(StringParseState(input, position)).asFailed
+        val result = parser.parse(StringParseState(input, position)).value.asFailed
         result.state.position mustEqual position
         result.error mustEqual "no more input"
   }
@@ -100,7 +102,7 @@ class TextParserSpec extends AnyFreeSpec, Matchers, ScalaCheckDrivenPropertyChec
 
       forAll(inputGen): (input, position, expected) =>
         val parser = string(expected)
-        val result = parser.parse(StringParseState(input, position)).asCompleted
+        val result = parser.parse(StringParseState(input, position)).value.asCompleted
         result.result mustEqual expected
         result.state.position mustEqual position + expected.length
 
@@ -113,7 +115,7 @@ class TextParserSpec extends AnyFreeSpec, Matchers, ScalaCheckDrivenPropertyChec
 
       forAll(inputGen): (input, expected) =>
         val parser = string(expected)
-        val result = parser.parse(input).asFailed
+        val result = parser.parse(input).value.asFailed
         result.state.position mustEqual 0
         result.error mustEqual s"could not parse '$expected'"
   }
@@ -124,14 +126,14 @@ class TextParserSpec extends AnyFreeSpec, Matchers, ScalaCheckDrivenPropertyChec
 
       forAll(Gen.alphaNumStr): input =>
         val parser = take(input.length)
-        val result = parser.parse(input).asCompleted
+        val result = parser.parse(input).value.asCompleted
         result.result mustEqual input
         result.state.position mustEqual input.length
 
     "must fail when there isn't enough input" in:
       forAll(Gen.alphaNumStr): input =>
         val parser = take(input.length + 1)
-        val result = parser.parse(input).asFailed
+        val result = parser.parse(input).value.asFailed
         result.error mustEqual "no more input"
         result.state.position mustEqual 0
   }
@@ -140,7 +142,7 @@ class TextParserSpec extends AnyFreeSpec, Matchers, ScalaCheckDrivenPropertyChec
 
     "must return a substring of the input while the given predicate holds" in:
       val parser = takeWhile(_.isLetter)
-      val result = parser.parse("abc123").asCompleted
+      val result = parser.parse("abc123").value.asCompleted
       result.result mustEqual "abc"
       result.state.position mustEqual 3
   }

@@ -1,15 +1,18 @@
-package wolfendale.parsers
+package io.github.wolfendale.parser.builder
 
+import io.github.wolfendale.parser.ParseResult.Completed
+import io.github.wolfendale.parser.{ParseResult, ParseResultExtensions, StringParseState}
 import org.scalacheck.Arbitrary.arbitrary
 import org.scalacheck.{Gen, Shrink}
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.must.Matchers
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
-import wolfendale.{ParseResult, ParseResultExtensions, Parser, StringParseState}
 
 class ParserCombinatorsSpec extends AnyFreeSpec, Matchers, ScalaCheckPropertyChecks, ParseResultExtensions:
 
   given [A]: Shrink[A] = Shrink.shrinkAny
+
+  import default.*
 
   "success" - {
 
@@ -18,7 +21,7 @@ class ParserCombinatorsSpec extends AnyFreeSpec, Matchers, ScalaCheckPropertyChe
       val parser = success(())
 
       forAll(arbitrary[String]): input =>
-        parser.parse(input) mustBe a[ParseResult.Completed[Unit]]
+        parser.parse(input).value mustBe a[Completed[Unit]]
   }
 
   "failed" - {
@@ -27,14 +30,14 @@ class ParserCombinatorsSpec extends AnyFreeSpec, Matchers, ScalaCheckPropertyChe
 
       forAll(arbitrary[String], arbitrary[String]): (input, error) =>
         val parser = failed(error)
-        parser.parse(input).asFailed.error mustEqual error
+        parser.parse(input).value.asFailed.error mustEqual error
   }
 
   "lookahead" - {
 
     "must return the result of the wrapped parser without incrementing the parsing position" in:
       val parser = lookahead(string("foo"))
-      val result = parser.parse("foo").asCompleted
+      val result = parser.parse("foo").value.asCompleted
       result.result mustEqual "foo"
       result.state.position mustEqual 0
   }
@@ -44,12 +47,12 @@ class ParserCombinatorsSpec extends AnyFreeSpec, Matchers, ScalaCheckPropertyChe
     val parser = matches(string("foo"))
 
     "must return true if the underlying parser matches the input, without incrementing position" in:
-      val result = parser.parse("foo").asCompleted
+      val result = parser.parse("foo").value.asCompleted
       result.result mustBe true
       result.state.position mustEqual 0
 
     "must return false if the underlying parser does not match the input" in:
-      val result = parser.parse("bar").asCompleted
+      val result = parser.parse("bar").value.asCompleted
       result.result mustBe false
       result.state.position mustEqual 0
   }
@@ -59,11 +62,11 @@ class ParserCombinatorsSpec extends AnyFreeSpec, Matchers, ScalaCheckPropertyChe
     val parser = zeroOrMore(anyChar)
 
     "must repeatedly consume the input while the parser succeeds" in:
-      val result = parser.parse("abc").asCompleted
+      val result = parser.parse("abc").value.asCompleted
       result.result mustEqual Seq('a', 'b', 'c')
 
     "must succeed with an empty result if the input does not match" in:
-      val result = parser.parse("").asCompleted
+      val result = parser.parse("").value.asCompleted
       result.result mustEqual Seq.empty
   }
 
@@ -72,18 +75,18 @@ class ParserCombinatorsSpec extends AnyFreeSpec, Matchers, ScalaCheckPropertyChe
     val parser = oneOrMore(anyChar)
 
     "must repeatedly consume the input while the parser succeeds" in:
-      val result = parser.parse("abc").asCompleted
+      val result = parser.parse("abc").value.asCompleted
       result.result mustEqual Seq('a', 'b', 'c')
 
     "must fail if the parser does not match at least once" in:
-      parser.parse("") mustBe a[ParseResult.Failed]
+      parser.parse("").value mustBe a[ParseResult.Failed]
   }
 
   "end" - {
 
     "must successfully parse when there is no more input left" in:
       forAll(Gen.alphaNumStr): input =>
-        end.parse(StringParseState(input, input.length)).asCompleted
+        end.parse(StringParseState(input, input.length)).value.asCompleted
 
     "must fail to parse if there is input left" in:
 
@@ -94,7 +97,7 @@ class ParserCombinatorsSpec extends AnyFreeSpec, Matchers, ScalaCheckPropertyChe
       yield (input, position)
 
       forAll(inputGen): (input, position) =>
-        val result = end.parse(StringParseState(input, position)).asFailed
+        val result = end.parse(StringParseState(input, position)).value.asFailed
         result.error mustEqual "input remaining"
   }
 
@@ -118,7 +121,7 @@ class ParserCombinatorsSpec extends AnyFreeSpec, Matchers, ScalaCheckPropertyChe
       lazy val lang: Parser[Lang] =
         ((terminal <~ char(';')) ~ lazily(lang)).map(Recur.apply) | terminal
 
-      val result = lang.parse("a;b;c").asCompleted
+      val result = lang.parse("a;b;c").value.asCompleted
       result.result mustEqual Recur(Terminal('a'), Recur(Terminal('b'), Terminal('c')))
   }
 
@@ -132,7 +135,7 @@ class ParserCombinatorsSpec extends AnyFreeSpec, Matchers, ScalaCheckPropertyChe
       yield (input, position)
 
       forAll(inputGen): (input, p) =>
-        val result = position.parse(StringParseState(input, p)).asCompleted
+        val result = position.parse(StringParseState(input, p)).value.asCompleted
         result.result mustEqual p
         result.state.position mustEqual p
   }
@@ -148,7 +151,7 @@ class ParserCombinatorsSpec extends AnyFreeSpec, Matchers, ScalaCheckPropertyChe
 
       forAll(inputGen): (input, n) =>
         val parser = repeat(anyChar, n)
-        val result = parser.parse(input).asCompleted
+        val result = parser.parse(input).value.asCompleted
         result.result mustEqual input.substring(0, n).toSeq
         result.state.position mustEqual n
 
@@ -156,7 +159,7 @@ class ParserCombinatorsSpec extends AnyFreeSpec, Matchers, ScalaCheckPropertyChe
 
       forAll(Gen.alphaNumStr): input =>
         val parser = repeat(anyChar, input.length + 1)
-        val result = parser.parse(input).asFailed
+        val result = parser.parse(input).value.asFailed
         result.state.position mustEqual 0
         result.error mustEqual "no more input"
   }

@@ -1,4 +1,4 @@
-package wolfendale
+package io.github.wolfendale.parser
 
 trait ParseState:
   def position: Int
