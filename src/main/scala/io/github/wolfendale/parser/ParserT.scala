@@ -1,66 +1,111 @@
 package io.github.wolfendale.parser
 
-import cats.*
 import cats.syntax.all.*
+import cats.{Monad, MonadError, StackSafeMonad}
 
 import scala.annotation.targetName
 
-abstract class ParserT[F[_], A]:
+final case class ParserT[F[+_] : Monad, +A](run: ParseState[F] => F[ParseResult[F, A]]):
 
-  def parse(state: ParseState): F[ParseResult[A]]
+  def parse(state: ParseState[F]): F[ParseResult[F, A]] =
+    run(state)
 
-  final def map[B](f: A => B)(using Functor[F]): ParserT[F, B] =
-    parse(_).map(_.map(f))
+  def parse(state: String): F[ParseResult[F, A]] =
+    parse(ParseState(StringParseInput(state)))
 
-  final def as[B](b: B)(using Functor[F]): ParserT[F, B] =
-    map(_ => b)
+  def flatMap[B](f: A => ParserT[F, B]): ParserT[F, B] =
+    ParserT[F, B]: state =>
+      parse(state).flatMap: result =>
+        result.result match
+          case error: ParseError =>
+            result.asInstanceOf[ParseResult[F, B]].pure
+          case a =>
+            // TODO is there a way to prove to the compiler this is safe?
+            f(a.asInstanceOf[A]).parse(result.state)
 
-  final def flatMap[B](f: A => ParserT[F, B])(using Monad[F]): ParserT[F, B] =
-    parse(_).flatMap:
-      case ParseResult.Completed(state, result) =>
-        f(result).parse(state)
-      case failed: ParseResult.Failed =>
-        failed.pure[F]
+  def handleErrorWith[B >: A](f: ParseError => ParserT[F, B]): ParserT[F, B] =
+    ParserT: state =>
+      parse(state).flatMap: result =>
+        result.result match
+          case error: ParseError =>
+            f(error).parse(result.state.withInput(state.input))
+          case _ =>
+            result.pure
 
   @targetName("and")
-  final def ~[B](other: ParserT[F, B])(using Monad[F]): ParserT[F, (A, B)] =
+  def ~[B](other: ParserT[F, B]): ParserT[F, (A, B)] =
     for a <- this; b <- other yield (a, b)
 
   @targetName("keepRight")
-  final def ~>[B](other: ParserT[F, B])(using Monad[F]): ParserT[F, B] =
+  def ~>[B](other: ParserT[F, B]): ParserT[F, B] =
     for _ <- this; b <- other yield b
 
+  @targetName("andThen")
+  def ~>>[B](f: A => ParserT[F, B]): ParserT[F, B] =
+    for a <- this; b <- f(a) yield b
+
   @targetName("keepLeft")
-  final def <~(other: ParserT[F, _])(using Monad[F]): ParserT[F, A] =
+  def <~[B](other: ParserT[F, B]): ParserT[F, A] =
     for a <- this; _ <- other yield a
 
+  @targetName("when")
+  def <<~[B](f: A => ParserT[F, B]): ParserT[F, A] =
+    for a <- this; _ <- f(a) yield a
+
   @targetName("or")
-  final def |[B](other: ParserT[F, B])(using Monad[F]): ParserT[F, A | B] =
-    state =>
-      parse(state).flatMap:
-        case completed: ParseResult.Completed[A] =>
-          completed.pure
-        case _ =>
-          other.parse(state).widen
+  def |[B](other: ParserT[F, B]): ParserT[F, A | B] =
+    handleErrorWith(_ => other)
 
 end ParserT
 
 object ParserT:
-  
-  def success[F[_] : Applicative, A](a: A): ParserT[F, A] =
-    ParseResult.Completed(_, a).pure
+
+  def getState[F[+_] : Monad]: ParserT[F, ParseState[F]] =
+    ParserT(state => ParseResult(state, state).pure)
     
-  def failed[F[_]: Applicative](error: String): ParserT[F, Nothing] =
-    ParseResult.Failed(_, error).pure
+  def inspect[F[+_] : Monad, A](run: ParseState[F] => F[ParseError | A]): ParserT[F, A] =
+    ParserT(state => run(state).map(ParseResult(state, _)))
 
-  given [F[_] : Monad]: StackSafeMonad[[A] =>> ParserT[F, A]] with
+  def replace[F[+_] : Monad](state: ParseState[F]): ParserT[F, Unit] =
+    ParserT(_ => ParseResult(state, ()).pure)
 
-    override def pure[A](x: A): ParserT[F, A] =
-      ParseResult.Completed(_, x).pure
+  def modify[F[+_] : Monad](run: ParseState[F] => F[ParseState[F]]): ParserT[F, Unit] =
+    ParserT(state => run(state).map(ParseResult(_, ())))
 
-    override def flatMap[A, B](fa: ParserT[F, A])(f: A => ParserT[F, B]): ParserT[F, B] =
-      fa.flatMap(f)
+  def success[F[+_] : Monad, A](a: A): ParserT[F, A] =
+    ParserT(ParseResult(_, a).pure)
 
-  end given
+  def successF[F[+_] : Monad, A](fa: F[A]): ParserT[F, A] =
+    ParserT(state => fa.map(ParseResult(state, _)))
+
+  def failed[F[+_] : Monad](error: ParseError): ParserT[F, Nothing] =
+    ParserT(ParseResult(_, error).pure)
+
+  given [F[+_] : Monad]: MonadError[[X] =>> ParserT[F, X], ParseError]
+    with StackSafeMonad[[X] =>> ParserT[F, X]] with
+
+      override def flatMap[A, B](fa: ParserT[F, A])(f: A => ParserT[F, B]): ParserT[F, B] =
+        fa.flatMap(f)
+
+      override def pure[A](x: A): ParserT[F, A] =
+        success(x)
+
+      override def raiseError[A](e: ParseError): ParserT[F, A] =
+        failed(e)
+
+      override def handleErrorWith[A](fa: ParserT[F, A])(f: ParseError => ParserT[F, A]): ParserT[F, A] =
+        fa.handleErrorWith(f)
+
+  extension [F[+_] : Monad, A](parser: ParserT[F, Option[A]])
+
+    def orFail(error: ParseError): ParserT[F, A] =
+      parser.flatMap: oa =>
+        oa.map(ParserT.success(_))
+          .getOrElse(ParserT.failed[F](error))
+
+  end extension
 
 end ParserT
+
+
+
